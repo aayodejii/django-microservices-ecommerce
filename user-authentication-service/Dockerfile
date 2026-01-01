@@ -1,0 +1,14 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN pip install uv
+
+COPY pyproject.toml ./
+RUN uv pip install --system -r pyproject.toml
+
+COPY . .
+
+EXPOSE 8001
+
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8001"]
