@@ -1,9 +1,13 @@
 import requests
+import re
+import logging
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 class ProxyView(APIView):
@@ -14,6 +18,17 @@ class ProxyView(APIView):
     service_url = None
     permission_classes = [AllowAny]
 
+    def _is_safe_path(self, path):
+        if not path:
+            return True
+        if '..' in path or path.startswith('/'):
+            return False
+        if any(prefix in path.lower() for prefix in ['http://', 'https://', 'ftp://']):
+            return False
+        if not re.match(r'^[a-zA-Z0-9/_.-]+$', path):
+            return False
+        return True
+
     def forward_request(self, request, path=""):
         if not self.service_url:
             return Response(
@@ -21,10 +36,15 @@ class ProxyView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        # Construct the full URL to the backend service
-        target_url = f"{self.service_url}/{path}"
+        if not self._is_safe_path(path):
+            logger.warning(f"Blocked unsafe path: {path}")
+            return Response(
+                {"error": "Invalid request path"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        # Forward authentication headers if present
+        target_url = f"{self.service_url}/api/{path}"
+
         headers = {}
         if request.auth:
             headers['Authorization'] = request.META.get('HTTP_AUTHORIZATION', '')
@@ -63,11 +83,14 @@ class ProxyView(APIView):
                     status=status.HTTP_405_METHOD_NOT_ALLOWED
                 )
 
-            # Pass through the backend service's response
-            return Response(
-                response.json() if response.content else {},
-                status=response.status_code
-            )
+            try:
+                data = response.json() if response.content else {}
+            except ValueError:
+                logger.error(f"Invalid JSON from {target_url}")
+                data = {"error": "Invalid response from service"}
+                return Response(data, status=status.HTTP_502_BAD_GATEWAY)
+
+            return Response(data, status=response.status_code)
 
         except requests.exceptions.ConnectionError:
             return Response(
