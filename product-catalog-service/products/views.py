@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.shortcuts import get_object_or_404
 from .models import Product
 from .serializers import ProductSerializer, ProductCreateUpdateSerializer
+from .filters import ProductFilter
 
 
 class ProductListCreateView(APIView):
@@ -15,6 +16,9 @@ class ProductListCreateView(APIView):
 
     def get(self, request):
         products = Product.objects.all()
+        filterset = ProductFilter(request.GET, queryset=products)
+        if filterset.is_valid():
+            products = filterset.qs
         serializer = ProductSerializer(products, many=True)
         return Response(serializer.data)
 
